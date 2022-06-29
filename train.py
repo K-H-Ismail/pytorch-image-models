@@ -36,7 +36,7 @@ from timm.loss import JsdCrossEntropy, BinaryCrossEntropy, SoftTargetCrossEntrop
     LabelSmoothingCrossEntropy
 from timm.optim import create_optimizer_v2, optimizer_kwargs
 from timm.scheduler import create_scheduler
-from timm.utils import ApexScaler, NativeScaler
+from timm.utils import ApexScaler, NativeScaler, init_distributed_mode, WandbLogger, DclsVisualizer
 
 try:
     from apex import amp
@@ -319,11 +319,41 @@ group.add_argument('--eval-metric', default='top1', type=str, metavar='EVAL_METR
                     help='Best metric (default: "top1"')
 group.add_argument('--tta', type=int, default=0, metavar='N',
                     help='Test/inference time augmentation (oversampling) factor. 0=None (default: 0)')
-group.add_argument("--local_rank", default=0, type=int)
 group.add_argument('--use-multi-epochs-loader', action='store_true', default=False,
                     help='use the multi-epochs-loader to save time at the beginning of every epoch')
+
+# Weights and Biases arguments
+group = parser.add_argument_group('Weights and Biases parameters')
+group.add_argument('--enable_wandb', action='store_true', default=False,
+                    help="enable logging to Weights and Biases")
+group.add_argument('--project', default='convmixer', type=str,
+                    help="The name of the W&B project where you're sending the new run.")
+group.add_argument('--wandb_ckpt', action='store_true', default=False,
+                    help="Save model checkpoints as W&B Artifacts.")
 group.add_argument('--log-wandb', action='store_true', default=False,
                     help='log training and validation metrics to wandb')
+
+# Distributed training parameters
+group = parser.add_argument_group('Distributed mode parameters')
+group.add_argument('--world_size', default=1, type=int,
+                    help='number of distributed processes')
+group.add_argument('--local_rank', default=-1, type=int)
+group.add_argument('--dist_on_itp', action='store_true', default=False)
+group.add_argument('--dist_url', default='env://',
+                    help='url used to set up distributed training')
+
+# Dcls arguments
+parser.add_argument('--use_dcls', action='store_true', default=False,
+                    help='Enabling dcls convolutions')
+parser.add_argument('--dcls_kernel_size', default=7, type=int,
+                    help='Dcls size of dilated kernel')
+parser.add_argument('--dcls_kernel_count', default=5, type=int,
+                    help='Dcls count of dilated kernel elementsts')
+parser.add_argument('--dcls_sync', action='store_true', default=False,
+                    help='Syncing all dcls depthwise layers')
+parser.add_argument('--use_loss_rep', action='store_true', default=False,
+                    help='Enabling dcls repulsive loss')
+
 
 
 def _parse_args():
@@ -346,32 +376,27 @@ def _parse_args():
 def main():
     utils.setup_default_logging()
     args, args_text = _parse_args()
+    print(args)
 
     args.prefetcher = not args.no_prefetcher
-    args.distributed = False
-    if 'WORLD_SIZE' in os.environ:
-        args.distributed = int(os.environ['WORLD_SIZE']) > 1
-    args.device = 'cuda:0'
-    args.world_size = 1
-    args.rank = 0  # global rank
-    if args.distributed:
-        args.device = 'cuda:%d' % args.local_rank
-        torch.cuda.set_device(args.local_rank)
-        torch.distributed.init_process_group(backend='nccl', init_method='env://')
-        args.world_size = torch.distributed.get_world_size()
-        args.rank = torch.distributed.get_rank()
-        _logger.info('Training in distributed mode with multiple processes, 1 GPU per process. Process %d, total %d.'
-                     % (args.rank, args.world_size))
-    else:
-        _logger.info('Training with a single process on 1 GPUs.')
-    assert args.rank >= 0
+    utils.init_distributed_mode(args)
 
-    if args.rank == 0 and args.log_wandb:
+    if args.log_wandb and args.rank==0:
         if has_wandb:
             wandb.init(project=args.experiment, config=args)
         else:
             _logger.warning("You've requested to log metrics to wandb but package not found. "
                             "Metrics not being logged to wandb, try `pip install wandb`")
+
+    if args.rank == 0 and args.enable_wandb:
+        print("Enabling Wandb")
+        wandb_logger = utils.WandbLogger(args)
+    else:
+        wandb_logger = None
+
+    if args.rank == 0 and wandb_logger and args.use_dcls:
+        print("init dcls visualizer")
+        dcls_logger = utils.DclsVisualizer(wandb_logger=wandb_logger, num_bins=args.dcls_kernel_size)
 
     # resolve AMP arguments based on PyTorch / Apex availability
     use_amp = None
@@ -394,29 +419,50 @@ def main():
     if args.fuser:
         utils.set_jit_fuser(args.fuser)
 
-    model = create_model(
-        args.model,
-        pretrained=args.pretrained,
-        num_classes=args.num_classes,
-        drop_rate=args.drop,
-        drop_connect_rate=args.drop_connect,  # DEPRECATED, use drop_path
-        drop_path_rate=args.drop_path,
-        drop_block_rate=args.drop_block,
-        global_pool=args.gp,
-        bn_momentum=args.bn_momentum,
-        bn_eps=args.bn_eps,
-        scriptable=args.torchscript,
-        checkpoint_path=args.initial_checkpoint)
+    if args.use_dcls:
+        model = create_model(
+            args.model,
+            pretrained=args.pretrained,
+            num_classes=args.num_classes,
+            drop_rate=args.drop,
+            drop_connect_rate=args.drop_connect,  # DEPRECATED, use drop_path
+            drop_path_rate=args.drop_path,
+            drop_block_rate=args.drop_block,
+            global_pool=args.gp,
+            bn_momentum=args.bn_momentum,
+            bn_eps=args.bn_eps,
+            scriptable=args.torchscript,
+            checkpoint_path=args.initial_checkpoint,
+            dcls_kernel_size=args.dcls_kernel_size,
+            dcls_kernel_count=args.dcls_kernel_count,
+            dcls_sync=args.dcls_sync)
+    else:
+        model = create_model(
+            args.model,
+            pretrained=args.pretrained,
+            num_classes=args.num_classes,
+            drop_rate=args.drop,
+            drop_connect_rate=args.drop_connect,  # DEPRECATED, use drop_path
+            drop_path_rate=args.drop_path,
+            drop_block_rate=args.drop_block,
+            global_pool=args.gp,
+            bn_momentum=args.bn_momentum,
+            bn_eps=args.bn_eps,
+            scriptable=args.torchscript,
+            checkpoint_path=args.initial_checkpoint)
+
     if args.num_classes is None:
         assert hasattr(model, 'num_classes'), 'Model must have `num_classes` attr if not set on cmd line/config.'
         args.num_classes = model.num_classes  # FIXME handle model default vs config num_classes more elegantly
+
+    param_count = sum([m.numel() for m in model.parameters()])
 
     if args.grad_checkpointing:
         model.set_grad_checkpointing(enable=True)
 
     if args.local_rank == 0:
         _logger.info(
-            f'Model {safe_model_name(args.model)} created, param count:{sum([m.numel() for m in model.parameters()])}')
+            f'Model {safe_model_name(args.model)} created, param count:{sum([m.numel() for m in model.parameters()])} \n {model}')
 
     data_config = resolve_data_config(vars(args), model=model, verbose=args.local_rank == 0)
 
@@ -651,10 +697,17 @@ def main():
             if args.distributed and hasattr(loader_train.sampler, 'set_epoch'):
                 loader_train.sampler.set_epoch(epoch)
 
+            if wandb_logger:
+                wandb_logger.set_steps()
+
             train_metrics = train_one_epoch(
                 epoch, model, loader_train, optimizer, train_loss_fn, args,
                 lr_scheduler=lr_scheduler, saver=saver, output_dir=output_dir,
-                amp_autocast=amp_autocast, loss_scaler=loss_scaler, model_ema=model_ema, mixup_fn=mixup_fn)
+                amp_autocast=amp_autocast, loss_scaler=loss_scaler, model_ema=model_ema,
+                mixup_fn=mixup_fn, wandb_logger=wandb_logger)
+
+            if args.use_dcls and args.rank == 0:
+                dcls_logger.log_all_layers(model, sync = args.dcls_sync)
 
             if args.distributed and args.dist_bn in ('broadcast', 'reduce'):
                 if args.local_rank == 0:
@@ -667,8 +720,9 @@ def main():
                 if args.distributed and args.dist_bn in ('broadcast', 'reduce'):
                     utils.distribute_bn(model_ema, args.world_size, args.dist_bn == 'reduce')
                 ema_eval_metrics = validate(
-                    model_ema.module, loader_eval, validate_loss_fn, args, amp_autocast=amp_autocast, log_suffix=' (EMA)')
-                eval_metrics = ema_eval_metrics
+                    model_ema.module, loader_eval, validate_loss_fn, args, amp_autocast=amp_autocast, log_suffix='_ema')
+
+                eval_metrics = {**eval_metrics, **ema_eval_metrics}
 
             if lr_scheduler is not None:
                 # step LR for next epoch
@@ -684,6 +738,17 @@ def main():
                 save_metric = eval_metrics[eval_metric]
                 best_metric, best_epoch = saver.save_checkpoint(epoch, metric=save_metric)
 
+            log_stats = {**{f'train_{k}': v for k, v in train_metrics.items()},
+                         **{f'test_{k}': v for k, v in eval_metrics.items()},
+                         'epoch': epoch,
+                         'n_parameters': param_count}
+
+            if wandb_logger:
+                wandb_logger.log_epoch_metrics(log_stats)
+
+        if wandb_logger and args.wandb_ckpt and args.save_ckpt and args.output_dir:
+            wandb_logger.log_checkpoints()
+
     except KeyboardInterrupt:
         pass
     if best_metric is not None:
@@ -693,7 +758,7 @@ def main():
 def train_one_epoch(
         epoch, model, loader, optimizer, loss_fn, args,
         lr_scheduler=None, saver=None, output_dir=None, amp_autocast=suppress,
-        loss_scaler=None, model_ema=None, mixup_fn=None):
+        loss_scaler=None, model_ema=None, mixup_fn=None, wandb_logger=None):
 
     if args.mixup_off_epoch and epoch >= args.mixup_off_epoch:
         if args.prefetcher and loader.mixup_enabled:
@@ -705,6 +770,8 @@ def train_one_epoch(
     batch_time_m = utils.AverageMeter()
     data_time_m = utils.AverageMeter()
     losses_m = utils.AverageMeter()
+    losses_fit_m = utils.AverageMeter()
+    losses_rep_m = utils.AverageMeter()
 
     model.train()
 
@@ -723,10 +790,20 @@ def train_one_epoch(
 
         with amp_autocast():
             output = model(input)
+
             loss = loss_fn(output, target)
+            loss_rep = torch.zeros_like(loss)
+            loss_fit = torch.zeros_like(loss)
+
+            if args.use_dcls and args.use_loss_rep:
+                loss_rep = utils.get_dcls_loss_rep(model, loss)
+                loss_fit = loss
+                #loss = loss + loss_rep ** 2 if epoch > 20 else loss
 
         if not args.distributed:
             losses_m.update(loss.item(), input.size(0))
+            losses_fit_m.update(loss_fit.item(), input.size(0))
+            losses_rep_m.update(loss_rep.item(), input.size(0))
 
         optimizer.zero_grad()
         if loss_scaler is not None:
@@ -743,6 +820,17 @@ def train_one_epoch(
                     value=args.clip_grad, mode=args.clip_mode)
             optimizer.step()
 
+        if args.use_dcls:
+            with torch.no_grad():
+                lim = args.dcls_kernel_size // 2
+                for i in range(4):
+                    if hasattr(model, 'module'):
+                        for j in range(len(model.module.P_stages[i])):
+                            getattr(model.module, 'layer' + str(i+1))[j].conv2.P.clamp_(-lim, lim)
+                    else:
+                        for j in range(len(model.P_stages[i])):
+                            getattr(model, 'layer' + str(i+1))[j].conv2.P.clamp_(-lim, lim)
+
         if model_ema is not None:
             model_ema.update(model)
 
@@ -752,10 +840,16 @@ def train_one_epoch(
         if last_batch or batch_idx % args.log_interval == 0:
             lrl = [param_group['lr'] for param_group in optimizer.param_groups]
             lr = sum(lrl) / len(lrl)
+            lrl_pos = [param_group['lr'] for param_group in optimizer.param_groups if param_group['names'][0].endswith(".P")] if args.use_dcls else [0]
+            lr_pos = sum(lrl_pos) / len(lrl_pos)
 
             if args.distributed:
                 reduced_loss = utils.reduce_tensor(loss.data, args.world_size)
+                reduced_loss_fit = utils.reduce_tensor(loss_fit.data, args.world_size)
+                reduced_loss_rep = utils.reduce_tensor(loss_rep.data, args.world_size)
                 losses_m.update(reduced_loss.item(), input.size(0))
+                losses_fit_m.update(reduced_loss_fit.item(), input.size(0))
+                losses_rep_m.update(reduced_loss_rep.item(), input.size(0))
 
             if args.local_rank == 0:
                 _logger.info(
@@ -795,7 +889,11 @@ def train_one_epoch(
     if hasattr(optimizer, 'sync_lookahead'):
         optimizer.sync_lookahead()
 
-    return OrderedDict([('loss', losses_m.avg)])
+    return OrderedDict([('loss', losses_m.avg),
+                        ('loss_rep', losses_rep_m.avg),
+                        ('lr_avg', lr),
+                        ('lr_pos_avg', lr_pos),
+                        ('loss_fit', losses_fit_m.avg)])
 
 
 def validate(model, loader, loss_fn, args, amp_autocast=suppress, log_suffix=''):
@@ -857,7 +955,7 @@ def validate(model, loader, loss_fn, args, amp_autocast=suppress, log_suffix='')
                         log_name, batch_idx, last_idx, batch_time=batch_time_m,
                         loss=losses_m, top1=top1_m, top5=top5_m))
 
-    metrics = OrderedDict([('loss', losses_m.avg), ('top1', top1_m.avg), ('top5', top5_m.avg)])
+    metrics = OrderedDict([('loss'+ log_suffix, losses_m.avg), ('top1'+ log_suffix, top1_m.avg), ('top5'+ log_suffix, top5_m.avg)])
 
     return metrics
 

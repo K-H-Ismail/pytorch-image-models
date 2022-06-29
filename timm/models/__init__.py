@@ -35,6 +35,7 @@ from .regnet import *
 from .res2net import *
 from .resnest import *
 from .resnet import *
+from .resnet_dcls import *
 from .resnetv2 import *
 from .rexnet import *
 from .selecsls import *

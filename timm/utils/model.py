@@ -40,20 +40,20 @@ def avg_ch_var_residual(model, input, output):
 
 
 class ActivationStatsHook:
-    """Iterates through each of `model`'s modules and matches modules using unix pattern 
-    matching based on `hook_fn_locs` and registers `hook_fn` to the module if there is 
-    a match. 
+    """Iterates through each of `model`'s modules and matches modules using unix pattern
+    matching based on `hook_fn_locs` and registers `hook_fn` to the module if there is
+    a match.
 
     Arguments:
         model (nn.Module): model from which we will extract the activation stats
-        hook_fn_locs (List[str]): List of `hook_fn` locations based on Unix type string 
-            matching with the name of model's modules. 
+        hook_fn_locs (List[str]): List of `hook_fn` locations based on Unix type string
+            matching with the name of model's modules.
         hook_fns (List[Callable]): List of hook functions to be registered at every
             module in `layer_names`.
-    
+
     Inspiration from https://docs.fast.ai/callback.hook.html.
 
-    Refer to https://gist.github.com/amaarora/6e56942fcb46e67ba203f3009b30d950 for an example 
+    Refer to https://gist.github.com/amaarora/6e56942fcb46e67ba203f3009b30d950 for an example
     on how to plot Signal Propogation Plots using `ActivationStatsHook`.
     """
 
@@ -87,9 +87,9 @@ def extract_spp_stats(
         hook_fn_locs,
         hook_fns,
         input_shape=[8, 3, 224, 224]):
-    """Extract average square channel mean and variance of activations during 
+    """Extract average square channel mean and variance of activations during
     forward pass to plot Signal Propogation Plots (SPP).
-    
+
     Paper: https://arxiv.org/abs/2101.08692
 
     Example Usage: https://gist.github.com/amaarora/6e56942fcb46e67ba203f3009b30d950
@@ -271,3 +271,20 @@ def unfreeze(root_module, submodules=[], include_bn_running_stats=True):
     See example in docstring for `freeze`.
     """
     _freeze_unfreeze(root_module, submodules, include_bn_running_stats=include_bn_running_stats, mode="unfreeze")
+
+def get_dcls_loss_rep(model, loss):
+    layer_count = 0
+    loss_rep = torch.zeros_like(loss)
+    for name, param in model.named_parameters():
+        if name.endswith(".P"):
+            layer_count += 1
+            chout, chin, k_count = param.size(1), param.size(2), param.size(3)
+            P = param.view(2, chout * chin, k_count)
+            P = P.permute(1,2,0).contiguous()
+            distances = torch.cdist(P,P,p=2)
+            distances_triu = (1-distances).triu(diagonal=1)
+            loss_rep += 2*torch.sum(torch.clamp_min(distances_triu , min=0)) / (k_count*(k_count-1)*chout*chin)
+
+    loss_rep /= layer_count
+    return loss_rep
+

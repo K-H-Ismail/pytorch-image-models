@@ -38,20 +38,27 @@ def param_groups_weight_decay(
         no_weight_decay_list=()
 ):
     no_weight_decay_list = set(no_weight_decay_list)
-    decay = []
-    no_decay = []
+    decay, names_decay = [], []
+    no_decay, names_no_decay = [], []
+    dcls_decay, names_dcls_decay = [], []
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
 
         if param.ndim <= 1 or name.endswith(".bias") or name in no_weight_decay_list:
             no_decay.append(param)
+            names_no_decay.append(name)
+        elif name.endswith(".P"):
+            dcls_decay.append(param)
+            names_dcls_decay.append(name)
         else:
             decay.append(param)
+            names_decay.append(name)
 
     return [
-        {'params': no_decay, 'weight_decay': 0.},
-        {'params': decay, 'weight_decay': weight_decay}]
+        {'params': no_decay, 'names': names_no_decay, 'weight_decay': 0.},
+        {'params': dcls_decay, 'names': names_dcls_decay, 'weight_decay': 0.},
+        {'params': decay, 'names': names_decay, 'weight_decay': weight_decay}]
 
 
 def _group(it, size):
