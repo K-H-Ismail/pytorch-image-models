@@ -17,16 +17,17 @@ import submitit
 def parse_args():
     classification_parser = classification.get_args_parser()
     parser = argparse.ArgumentParser("Submitit for Vision classification references", parents=[classification_parser])
-    parser.add_argument("--ngpus", default=8, type=int, help="Number of gpus to request on each node")
-    parser.add_argument("--nodes", default=1, type=int, help="Number of nodes to request")
-    parser.add_argument("--timeout", default=20, type=int, help="Duration of the job, in hours")
-    parser.add_argument("--job_name", default="resnet", type=str, help="Job name")
-    parser.add_argument("--job_dir", default="", type=str, help="Job directory; leave empty for default")
-    parser.add_argument("--partition", default="gpu_p2", type=str, help="Partition where to submit")
-    parser.add_argument("--use_volta32", action='store_true', default=False, help="Big models? Use this")
-    parser.add_argument("--constraint", default="v100", type=str, help="constraint v100 or a100")
-    parser.add_argument("--account", default="owj@v100", type=str, help="Account name")
-    parser.add_argument('--comment', default="", type=str,
+    group = parser.add_argument_group("Submitit parameters")
+    group.add_argument("--ngpus", default=8, type=int, help="Number of gpus to request on each node")
+    group.add_argument("--nodes", default=1, type=int, help="Number of nodes to request")
+    group.add_argument("--timeout", default=20, type=int, help="Duration of the job, in hours")
+    group.add_argument("--job_name", default="resnet", type=str, help="Job name")
+    group.add_argument("--job_dir", default="", type=str, help="Job directory; leave empty for default")
+    group.add_argument("--partition", default="gpu_p2", type=str, help="Partition where to submit")
+    group.add_argument("--use_volta32", action='store_true', default=False, help="Big models? Use this")
+    group.add_argument("--constraint", default="v100", type=str, help="constraint v100 or a100")
+    group.add_argument("--account", default="owj@v100", type=str, help="Account name")
+    group.add_argument('--comment', default="", type=str,
                         help='Comment to pass to scheduler, e.g. priority message')
     return parser.parse_args()
 
@@ -51,7 +52,7 @@ class Trainer(object):
         self.args = args
 
     def __call__(self):
-        import main as classification
+        import train as classification
 
         self._setup_gpu_args()
         classification.main(self.args)
@@ -80,7 +81,6 @@ class Trainer(object):
 
 def main():
     args = parse_args()
-
     if args.job_dir == "":
         args.job_dir = get_shared_folder() / "%j"
 
@@ -103,7 +103,7 @@ def main():
         #mem_gb=40 * num_gpus_per_node,
         gpus_per_node=num_gpus_per_node,
         tasks_per_node=num_gpus_per_node,  # one task per GPU
-        cpus_per_task=args.num_workers,
+        cpus_per_task=args.workers,
         slurm_account=args.account,
         nodes=nodes,
         timeout_min=timeout_min,  # max is 60 * 72
