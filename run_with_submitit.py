@@ -15,8 +15,10 @@ import train as classification
 import submitit
 
 def parse_args():
-    classification_parser = classification.get_args_parser()
+    classification_parser, config_parser = classification.get_args_parser()
     parser = argparse.ArgumentParser("Submitit for Vision classification references", parents=[classification_parser])
+    parser.add_argument('-c', '--config', default='', type=str, metavar='FILE',
+                        help='YAML config file specifying default arguments')
     group = parser.add_argument_group("Submitit parameters")
     group.add_argument("--ngpus", default=8, type=int, help="Number of gpus to request on each node")
     group.add_argument("--nodes", default=1, type=int, help="Number of nodes to request")
@@ -29,7 +31,21 @@ def parse_args():
     group.add_argument("--account", default="owj@v100", type=str, help="Account name")
     group.add_argument('--comment', default="", type=str,
                         help='Comment to pass to scheduler, e.g. priority message')
-    return parser.parse_args()
+
+    # Do we have a config file to parse?
+    args_config, remaining = config_parser.parse_known_args()
+    if args_config.config:
+        with open(args_config.config, 'r') as f:
+            cfg = yaml.safe_load(f)
+            parser.set_defaults(**cfg)
+
+    # The main arg parser parses the rest of the args, the usual
+    # defaults will have been overridden if config file specified.
+    args = parser.parse_args(remaining)
+
+    # Cache the args as a text string to save them in the output dir later
+    args_text = yaml.safe_dump(args.__dict__, default_flow_style=False)
+    return args, args_text
 
 def get_shared_folder() -> Path:
     work = os.getenv("WORK")
@@ -80,7 +96,7 @@ class Trainer(object):
 
 
 def main():
-    args = parse_args()
+    args, args_text = parse_args()
     if args.job_dir == "":
         args.job_dir = get_shared_folder() / "%j"
 
@@ -118,7 +134,7 @@ def main():
     args.dist_url = get_init_file().as_uri()
     args.output_dir = args.job_dir
 
-    trainer = Trainer(args)
+    trainer = Trainer(args, args_text)
     job = executor.submit(trainer)
 
     print("Submitted job_id:", job.job_id)

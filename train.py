@@ -357,7 +357,7 @@ parser.add_argument('--use_loss_rep', action='store_true', default=False,
                     help='Enabling dcls repulsive loss')
 
 def get_args_parser():
-    return parser
+    return parser, config_parser
 
 def _parse_args():
     # Do we have a config file to parse?
