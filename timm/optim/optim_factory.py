@@ -57,7 +57,7 @@ def param_groups_weight_decay(
 
     return [
         {'params': no_decay, 'names': names_no_decay, 'weight_decay': 0.},
-        {'params': dcls_decay, 'names': names_dcls_decay, 'weight_decay': 0.},
+        {'params': dcls_decay, 'names': names_dcls_decay, 'weight_decay': 0., 'lr_scale': 5.},
         {'params': decay, 'names': names_decay, 'weight_decay': weight_decay}]
 
 
