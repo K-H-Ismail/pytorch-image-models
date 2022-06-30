@@ -76,7 +76,7 @@ parser.add_argument('-c', '--config', default='', type=str, metavar='FILE',
                     help='YAML config file specifying default arguments')
 
 
-parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
+parser = argparse.ArgumentParser(description='PyTorch ImageNet Training', add_help=False)
 
 # Dataset parameters
 group = parser.add_argument_group('Dataset parameters')
@@ -326,6 +326,8 @@ group.add_argument('--use-multi-epochs-loader', action='store_true', default=Fal
 group = parser.add_argument_group('Weights and Biases parameters')
 group.add_argument('--enable_wandb', action='store_true', default=False,
                     help="enable logging to Weights and Biases")
+group.add_argument('--online_wandb', action='store_true', default=False,
+                    help="enable online logging to Weights and Biases")
 group.add_argument('--project', default='convmixer', type=str,
                     help="The name of the W&B project where you're sending the new run.")
 group.add_argument('--wandb_ckpt', action='store_true', default=False,
@@ -354,7 +356,8 @@ parser.add_argument('--dcls_sync', action='store_true', default=False,
 parser.add_argument('--use_loss_rep', action='store_true', default=False,
                     help='Enabling dcls repulsive loss')
 
-
+def get_args_parser():
+    return parser
 
 def _parse_args():
     # Do we have a config file to parse?
@@ -373,29 +376,30 @@ def _parse_args():
     return args, args_text
 
 
-def main():
+def main(args, args_text=None):
     utils.setup_default_logging()
-    args, args_text = _parse_args()
-    print(args)
+    _logger(args)
 
     args.prefetcher = not args.no_prefetcher
     utils.init_distributed_mode(args)
 
     if args.log_wandb and args.rank==0:
         if has_wandb:
+            os.environ['WANDB_MODE'] = 'online' if args.online_wandb else 'offline'
             wandb.init(project=args.experiment, config=args)
         else:
             _logger.warning("You've requested to log metrics to wandb but package not found. "
                             "Metrics not being logged to wandb, try `pip install wandb`")
 
     if args.rank == 0 and args.enable_wandb:
-        print("Enabling Wandb")
+        _logger("Enabling Wandb")
         wandb_logger = utils.WandbLogger(args)
+
     else:
         wandb_logger = None
 
     if args.rank == 0 and wandb_logger and args.use_dcls:
-        print("init dcls visualizer")
+        _logger("init dcls visualizer")
         dcls_logger = utils.DclsVisualizer(wandb_logger=wandb_logger, num_bins=args.dcls_kernel_size)
 
     # resolve AMP arguments based on PyTorch / Apex availability
@@ -692,7 +696,7 @@ def main():
             model=model, optimizer=optimizer, args=args, model_ema=model_ema, amp_scaler=loss_scaler,
             checkpoint_dir=output_dir, recovery_dir=output_dir, decreasing=decreasing, max_history=args.checkpoint_hist)
         with open(os.path.join(output_dir, 'args.yaml'), 'w') as f:
-            f.write(args_text)
+            f.write(args_text if args_text is not None else '')
 
     try:
         for epoch in range(start_epoch, num_epochs):
@@ -963,4 +967,5 @@ def validate(model, loader, loss_fn, args, amp_autocast=suppress, log_suffix='')
 
 
 if __name__ == '__main__':
-    main()
+    args, args_text = _parse_args()
+    main(args, args_text)
