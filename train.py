@@ -378,7 +378,7 @@ def _parse_args():
 
 def main(args, args_text=None):
     utils.setup_default_logging()
-    _logger(args)
+    _logger.info(args)
 
     args.prefetcher = not args.no_prefetcher
     utils.init_distributed_mode(args)
@@ -392,14 +392,14 @@ def main(args, args_text=None):
                             "Metrics not being logged to wandb, try `pip install wandb`")
 
     if args.rank == 0 and args.enable_wandb:
-        _logger("Enabling Wandb")
+        _logger.info("Enabling Wandb")
         wandb_logger = utils.WandbLogger(args)
 
     else:
         wandb_logger = None
 
     if args.rank == 0 and wandb_logger and args.use_dcls:
-        _logger("init dcls visualizer")
+        _logger.info("init dcls visualizer")
         dcls_logger = utils.DclsVisualizer(wandb_logger=wandb_logger, num_bins=args.dcls_kernel_size)
 
     # resolve AMP arguments based on PyTorch / Apex availability
