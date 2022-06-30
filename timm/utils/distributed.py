@@ -5,6 +5,7 @@ Hacked together by / Copyright 2020 Ross Wightman
 import os
 import torch
 from torch import distributed as dist
+import hostlist
 
 from .model import unwrap_model
 
@@ -66,6 +67,7 @@ def init_distributed_mode(args):
         return
 
     args.distributed = True
+    args.local_rank = args.gpu
 
     torch.cuda.set_device(args.gpu)
     args.dist_backend = 'nccl'
