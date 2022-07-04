@@ -10,6 +10,7 @@ import argparse
 import os
 import uuid
 from pathlib import Path
+import yaml
 
 import train as classification
 import submitit
@@ -64,14 +65,15 @@ def get_init_file():
     return init_file
 
 class Trainer(object):
-    def __init__(self, args):
+    def __init__(self, args, args_text=None):
         self.args = args
+        self.args_text = args_text
 
     def __call__(self):
         import train as classification
 
         self._setup_gpu_args()
-        classification.main(self.args)
+        classification.main(self.args, self.args_text)
 
     def checkpoint(self):
         import os
@@ -80,7 +82,7 @@ class Trainer(object):
         self.args.dist_url = get_init_file().as_uri()
         self.args.auto_resume = True
         print("Requeuing ", self.args)
-        empty_trainer = type(self)(self.args)
+        empty_trainer = type(self)(self.args, self.args_text)
         return submitit.helpers.DelayedSubmission(empty_trainer)
 
     def _setup_gpu_args(self):
