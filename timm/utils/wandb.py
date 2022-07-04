@@ -141,7 +141,7 @@ class DclsVisualizer(object):
 
         self.df[key] = df if key not in self.df else pd.concat([self.df[key], df], ignore_index=True)
 
-        step = 298 #max(self.max_epoch//10, 1)
+        step = max(self.max_epoch//30, 1)
         if self.epoch % step == 0:
             fig = px.scatter(self.df[key], x=0, y=1, color=2, range_x=[-self.num_bins//2,self.num_bins//2], range_y=[-self.num_bins//2,self.num_bins//2], animation_frame=3, size=2)
             with tempfile.NamedTemporaryFile() as fp:
