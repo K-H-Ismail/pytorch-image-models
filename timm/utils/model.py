@@ -279,7 +279,7 @@ def get_dcls_loss_rep(model, loss):
         if name.endswith(".P"):
             layer_count += 1
             chout, chin, k_count = param.size(1), param.size(2), param.size(3)
-            P = param.view(2, chout * chin, k_count)
+            P = param.reshape(2, chout * chin, k_count)
             P = P.permute(1,2,0).contiguous()
             distances = torch.cdist(P,P,p=2)
             distances_triu = (1-distances).triu(diagonal=1)
