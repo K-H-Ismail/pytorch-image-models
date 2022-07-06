@@ -804,7 +804,7 @@ def train_one_epoch(
             if args.use_dcls and args.use_loss_rep:
                 loss_rep = utils.get_dcls_loss_rep(model, loss)
                 loss_fit = loss
-                #loss = loss + loss_rep ** 2 if epoch > 20 else loss
+                loss = loss + loss_rep ** 2 if epoch > 20 else loss
 
         if not args.distributed:
             losses_m.update(loss.item(), input.size(0))
