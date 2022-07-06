@@ -278,6 +278,8 @@ def get_dcls_loss_rep(model, loss):
     for name, param in model.named_parameters():
         if name.endswith(".P"):
             layer_count += 1
+            if param.dim() < 4 :
+                param = param.unsqueeze(1)
             chout, chin, k_count = param.size(1), param.size(2), param.size(3)
             P = param.reshape(2, chout * chin, k_count)
             P = P.permute(1,2,0).contiguous()

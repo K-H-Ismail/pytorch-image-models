@@ -123,6 +123,10 @@ class DclsVisualizer(object):
         out_channels, kernel_count = p.out_channels, p.kernel_count
         p = p.P * p.scaling
 
+        if param.dim() < 4 :
+            p = p.unsqueeze(1)
+            out_channels = 1
+
         if key not in self.p_prev:
             self.p_prev[key] = torch.zeros_like(p)
 
@@ -159,19 +163,3 @@ class DclsVisualizer(object):
                     self.log_layer(model, stage, block)
         self.epoch += 1
 
-def get_dcls_loss_rep(model, loss):
-    layer_count = 0
-    loss_rep = torch.zeros_like(loss)
-    for name, param in model.named_parameters():
-        print(name)
-        if name.endswith(".P"):
-            layer_count += 1
-            chout, chin, k_count = param.size(1), param.size(2), param.size(3)
-            P = param.view(2, chout * chin, k_count)
-            P = P.permute(1,2,0).contiguous()
-            distances = torch.cdist(P,P,p=2)
-            distances_triu = (1-distances).triu(diagonal=1)
-            loss_rep += 2*torch.sum(torch.clamp_min(distances_triu , min=0)) / (k_count*(k_count-1)*chout*chin)
-
-    loss_rep /= layer_count
-    return loss_rep
