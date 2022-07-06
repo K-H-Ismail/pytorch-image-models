@@ -123,7 +123,7 @@ class DclsVisualizer(object):
         out_channels, kernel_count = p.out_channels, p.kernel_count
         p = p.P * p.scaling
 
-        if param.dim() < 4 :
+        if p.dim() < 4 :
             p = p.unsqueeze(1)
             out_channels = 1
 
