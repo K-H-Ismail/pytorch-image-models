@@ -117,15 +117,15 @@ class DclsVisualizer(object):
         if dcls_df is not None:
             self.df = dcls_df
 
-    def log_layer(self, model, stage, block):
+    def log_layer(self, param, stage, block):
         key = 's{stage},b{block}'.format(stage=stage,block=block)
-        p = getattr(model.module, 'layer' + str(stage+1))[block].conv2 if hasattr(model, 'module') else getattr(model, 'layer' + str(stage+1))[block].conv2
-        out_channels, kernel_count = p.out_channels, p.kernel_count
-        p = p.P * p.scaling
+        p = param
 
-        if param.dim() < 4 :
+        if p.dim() < 4 :
             p = p.unsqueeze(1)
             out_channels = 1
+        else:
+            out_channels, kernel_count = p.size(1), p.size(-1)
 
         if key not in self.p_prev:
             self.p_prev[key] = torch.zeros_like(p)
@@ -155,11 +155,21 @@ class DclsVisualizer(object):
         self.p_prev[key] = p
 
     def log_all_layers(self, model, sync=False):
-        for stage in range(self.num_stages):
-            if sync:
-                self.log_layer(model, stage, 0)
-            else:
-                for block in range(model.module.layers[stage]):
-                    self.log_layer(model, stage, block)
+        stage = -1
+        block = 0
+        size = None
+        for name, param in model.named_parameters():
+            if name.endswith(".P"):
+                if size == param.size():
+                    if sync:
+                        pass
+                    else:
+                        block +=1
+                        self.log_layer(param, stage, block)
+                else:
+                    stage +=1
+                    block = 0
+                    self.log_layer(param, stage, block)
+                size = param.size()
         self.epoch += 1
 
