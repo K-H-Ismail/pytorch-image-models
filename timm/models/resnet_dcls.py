@@ -609,6 +609,7 @@ class ResNet(nn.Module):
             drop_rate=0.0, drop_path_rate=0., drop_block_rate=0., zero_init_last=True, block_args=None, dcls_kernel_size=7,
             dcls_kernel_count=5, dcls_sync=False):
         super(ResNet, self).__init__()
+        self.dcls_kernel_size = dcls_kernel_size
         block_args = block_args or dict()
         block_args['dcls_kernel_size'] = dcls_kernel_size
         block_args['dcls_kernel_count'] = dcls_kernel_count
@@ -744,6 +745,13 @@ class ResNet(nn.Module):
         x = self.forward_features(x)
         x = self.forward_head(x)
         return x
+
+    def clamp_parameters(self):
+        with torch.no_grad():
+            lim = self.dcls_kernel_size // 2
+            for i in range(4):
+                self.P_stages[i].clamp_(-lim, lim)
+
 
 
 def _create_resnet(variant, pretrained=False, **kwargs):

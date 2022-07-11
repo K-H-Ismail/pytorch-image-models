@@ -827,15 +827,10 @@ def train_one_epoch(
             optimizer.step()
 
         if args.use_dcls:
-            with torch.no_grad():
-                lim = args.dcls_kernel_size // 2
-                for i in range(4):
-                    if hasattr(model, 'module'):
-                        for j in range(len(model.module.P_stages[i])):
-                            getattr(model.module, 'layer' + str(i+1))[j].conv2.P.clamp_(-lim, lim)
-                    else:
-                        for j in range(len(model.P_stages[i])):
-                            getattr(model, 'layer' + str(i+1))[j].conv2.P.clamp_(-lim, lim)
+            if hasattr(model, 'module'):
+                model.module.clamp_parameters()
+            else:
+                model.clamp_parameters()
 
         if model_ema is not None:
             model_ema.update(model)
